@@ -3,6 +3,7 @@ Luigi tasks for extracting problem answer distribution statistics from
 tracking log files.
 """
 import csv
+import datetime
 import hashlib
 import html5lib
 import json
@@ -572,7 +573,8 @@ class AllProblemCheckEventsInHiveTask(AllProblemCheckEventsParamMixin, Multipart
         # And if one or the other is not present, then assume that the interval is not present,
         # and trigger the entire task.
         starting_partition = HivePartition('dt', self.interval.date_a.isoformat())  # pylint: disable=no-member
-        ending_partition = HivePartition('dt', self.interval.date_b.isoformat())  # pylint: disable=no-member
+        ending_date = self.interval.date_b - datetime.timedelta(days=1)  # pylint: disable=no-member
+        ending_partition = HivePartition('dt', ending_date.isoformat())
 
         return [
             HivePartitionTarget(self.table, starting_partition.as_dict(), database=hive_database_name()),
