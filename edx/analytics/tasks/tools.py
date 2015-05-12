@@ -167,12 +167,16 @@ class EventsPerCourseModule(EventCounter):
     def get_grouping_key(self, line, event, date_string):
         course_id = eventlog.get_course_id(event)
         event_data = eventlog.get_event_data(event)
-        event_type = event.get('event_type', '')
+        event_type = event.get('event_type')
+        event_source = event.get('event_source', '')
+
+        if event_type is None:
+            return None
 
         module_id = None
         if event_type.endswith('_video') and 'id' in event_data:
             module_id = event_data['id']
-        elif event_type == 'problem_check' and event.get('event_source', '') == 'server' and 'problem_id' in event_data:
+        elif event_type == 'problem_check' and event_source == 'server' and 'problem_id' in event_data:
             module_id = event_data['problem_id']
 
         if module_id is None or course_id is None:
