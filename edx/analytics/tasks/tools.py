@@ -156,7 +156,7 @@ class EventCounter(EventLogSelectionMixin, MapReduceJobTask):
             total_size += length
         yield key, (num_events, total_size)
 
-    combiner = reducer
+    # combiner = reducer
 
     def output(self):
         return get_target_from_url(self.output_root)
