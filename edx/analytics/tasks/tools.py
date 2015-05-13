@@ -170,7 +170,7 @@ class EventsPerCourseModule(EventCounter):
         event_type = event.get('event_type')
         event_source = event.get('event_source', '')
 
-        if event_type is None:
+        if event_type is None or event_data is None:
             return None
 
         module_id = None
