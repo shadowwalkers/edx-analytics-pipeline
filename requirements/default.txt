@@ -15,6 +15,7 @@ mysql-connector-python==1.2.2  	# GPL v2 with FOSS License Exception
 numpy==1.8.0 		# BSD
 pandas==0.13.0 		# BSD
 paramiko==1.14.0 	# LGPL
+# paypalrestsdk==1.9.0
 pbr==0.5.23 		# Apache
 pip==1.5.6		# MIT // AN-4322
 pycrypto==2.6.1 	# public domain
@@ -24,6 +25,7 @@ python-cjson==1.0.5	# LGPL
 python-dateutil==2.2 	# BSD
 python-gnupg==0.3.6	# BSD
 pytz==2014.4		# ZPL
+requests==2.6.0
 six==1.6.1		# MIT
 stevedore==0.14.1 	# Apache 2.0
 tornado==3.1.1 		# Apache 2.0
