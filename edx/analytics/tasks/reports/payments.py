@@ -13,21 +13,22 @@ from edx.analytics.tasks.url import url_path_join
 from edx.analytics.tasks.util.hive import HivePartition
 from edx.analytics.tasks.util.overwrite import OverwriteOutputMixin
 
+
 class PullFromCybersourceTaskMixin(OverwriteOutputMixin):
 
-    # Note: putting these into a credentials file means we can run this without
-    # passwords showing up in log files on Jenkins and the like.
-    username = luigi.Parameter(
-        default_from_config={'section': 'cybersource', 'name': 'username'}
-    )
-    password = luigi.Parameter(
-        default_from_config={'section': 'cybersource', 'name': 'password'}
+    host = luigi.Parameter(
+        default_from_config={'section': 'cybersource', 'name': 'host'}
     )
     merchant_id = luigi.Parameter(
         default_from_config={'section': 'cybersource', 'name': 'merchant_id'}
     )
-    host = luigi.Parameter(
-        default_from_config={'section': 'cybersource', 'name': 'host'}
+    username = luigi.Parameter(
+        default_from_config={'section': 'cybersource', 'name': 'username'}
+    )
+    # Making this 'insignificant' means it won't be echoed in log files.
+    password = luigi.Parameter(
+        default_from_config={'section': 'cybersource', 'name': 'password'},
+        significant=False,
     )
 
 
@@ -65,7 +66,7 @@ class SinglePullFromCybersourceTask(PullFromCybersourceTaskMixin, luigi.Task):
                 output_file.write('\n')
 
     def output(self):
-        date_string = self.run_date.strftime('%Y-%m-%d')
+        date_string = self.run_date.strftime('%Y-%m-%d')  # pylint: disable=no-member
         partition_path_spec = HivePartition('dt', date_string).path_spec
         filename = "cybersource_{}.tsv".format(self.merchant_id)
         url_with_filename = url_path_join(self.output_root, partition_path_spec, filename)
@@ -73,7 +74,7 @@ class SinglePullFromCybersourceTask(PullFromCybersourceTaskMixin, luigi.Task):
 
     @property
     def query_url(self):
-        slashified_date = self.run_date.strftime('%Y/%m/%d')
+        slashified_date = self.run_date.strftime('%Y/%m/%d')  # pylint: disable=no-member
         url = 'https://{host}/DownloadReport/{date}/{merchant_id}/{report_name}.{report_format}'.format(
             host=self.host,
             date=slashified_date,
@@ -94,8 +95,8 @@ class IntervalPullFromCybersourceTask(PullFromCybersourceTaskMixin, luigi.Task):
 
     def _get_required_tasks(self):
         """Internal method to actually calculate required tasks once."""
-        start_date = self.interval.date_a
-        end_date = self.interval.date_b
+        start_date = self.interval.date_a  # pylint: disable=no-member
+        end_date = self.interval.date_b  # pylint: disable=no-member
         args = {
             'host': self.host,
             'merchant_id': self.merchant_id,
@@ -125,16 +126,16 @@ class IntervalPullFromCybersourceTask(PullFromCybersourceTaskMixin, luigi.Task):
 
 class PullFromPaypalTaskMixin(OverwriteOutputMixin):
 
-    # Note: putting these into a credentials file means we can run this without
-    # passwords showing up in log files on Jenkins and the like.
     client_mode = luigi.Parameter(
         default_from_config={'section': 'paypal', 'name': 'client_mode'}
     )
     client_id = luigi.Parameter(
         default_from_config={'section': 'paypal', 'name': 'client_id'}
     )
+    # Making this 'insignificant' means it won't be echoed in log files.
     client_secret = luigi.Parameter(
-        default_from_config={'section': 'paypal', 'name': 'client_secret'}
+        default_from_config={'section': 'paypal', 'name': 'client_secret'},
+        significant=False,
     )
 
 
@@ -159,7 +160,7 @@ class SinglePullFromPaypalTask(PullFromPaypalTaskMixin, luigi.Task):
             'client_id': self.client_id,
             'client_secret': self.client_secret
         })
-        
+
     def requires(self):
         pass
 
@@ -170,8 +171,8 @@ class SinglePullFromPaypalTask(PullFromPaypalTaskMixin, luigi.Task):
 
         end_date = self.run_date + datetime.timedelta(days=1)
         # Maximum number to request at any time is 20.
-        request_args = { 
-            'start_time': "{}T00:00:00Z".format(self.run_date.isoformat()),
+        request_args = {
+            'start_time': "{}T00:00:00Z".format(self.run_date.isoformat()),  # pylint: disable=no-member
             'end_time': "{}T00:00:00Z".format(end_date.isoformat()),
             'count': 10
         }
@@ -207,7 +208,7 @@ class SinglePullFromPaypalTask(PullFromPaypalTaskMixin, luigi.Task):
   batch_date            payment.update_time
   request_id            ?
   merchant_ref_number   ?
-  trans_ref_no          payment.id 
+  trans_ref_no          payment.id
   payment_method        payment.payer.payment_method
   currency              payment.transactions[0].amount.currency
   amount                payment.transactions[0].amount.total
@@ -229,11 +230,12 @@ class SinglePullFromPaypalTask(PullFromPaypalTaskMixin, luigi.Task):
         output_file.write('\n')
 
     def output(self):
-        date_string = self.run_date.strftime('%Y-%m-%d')
+        date_string = self.run_date.strftime('%Y-%m-%d')  # pylint: disable=no-member
         partition_path_spec = HivePartition('dt', date_string).path_spec
         filename = "paypal_{}.tsv".format(self.client_mode)
         url_with_filename = url_path_join(self.output_root, partition_path_spec, filename)
         return get_target_from_url(url_with_filename)
+
 
 class IntervalPullFromPaypalTask(PullFromPaypalTaskMixin, luigi.Task):
     """Determines a set of dates to pull, and requires them."""
@@ -245,8 +247,8 @@ class IntervalPullFromPaypalTask(PullFromPaypalTaskMixin, luigi.Task):
 
     def _get_required_tasks(self):
         """Internal method to actually calculate required tasks once."""
-        start_date = self.interval.date_a
-        end_date = self.interval.date_b
+        start_date = self.interval.date_a  # pylint: disable=no-member
+        end_date = self.interval.date_b  # pylint: disable=no-member
         args = {
             'client_mode': self.client_mode,
             'client_id': self.client_id,
@@ -271,5 +273,3 @@ class IntervalPullFromPaypalTask(PullFromPaypalTaskMixin, luigi.Task):
 
     def output(self):
         return [task.output() for task in self.requires()]
-
-
