@@ -2,16 +2,25 @@
 
 import csv
 import datetime
+import logging
 import requests
 import StringIO
 
 import luigi
-import paypalrestsdk
 
 from edx.analytics.tasks.url import get_target_from_url
 from edx.analytics.tasks.url import url_path_join
 from edx.analytics.tasks.util.hive import HivePartition
 from edx.analytics.tasks.util.overwrite import OverwriteOutputMixin
+
+log = logging.getLogger(__name__)
+
+try:
+    import paypalrestsdk
+    paypalrestsdk_available = True
+except ImportError:
+    log.warn('Unable to import paypalrestsdk client libraries')
+    paypalrestsdk_available = False
 
 
 class PullFromCybersourceTaskMixin(OverwriteOutputMixin):
@@ -155,6 +164,9 @@ class SinglePullFromPaypalTask(PullFromPaypalTaskMixin, luigi.Task):
     run_date = luigi.DateParameter(default=datetime.date.today())
 
     def initialize(self):
+        if not paypalrestsdk_available:
+            raise ImportError('paypalrestsdk client library not available')
+
         paypalrestsdk.configure({
             'mode': self.client_mode,
             'client_id': self.client_id,
