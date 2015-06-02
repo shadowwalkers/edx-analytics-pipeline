@@ -2,17 +2,21 @@
 
 import csv
 import datetime
-import json
 import logging
 import requests
 import StringIO
-
 import luigi
+import paypalrestsdk
 
 from edx.analytics.tasks.url import get_target_from_url
 from edx.analytics.tasks.url import url_path_join
 from edx.analytics.tasks.util.hive import HivePartition
 from edx.analytics.tasks.util.overwrite import OverwriteOutputMixin
+
+# Tell urllib3 to switch the ssl backend to PyOpenSSL.
+# see https://urllib3.readthedocs.org/en/latest/security.html#pyopenssl
+import urllib3.contrib.pyopenssl
+urllib3.contrib.pyopenssl.inject_into_urllib3()
 
 log = logging.getLogger(__name__)
 
@@ -160,101 +164,52 @@ class SinglePullFromPaypalTask(PullFromPaypalTaskMixin, luigi.Task):
     output_root = luigi.Parameter()
     run_date = luigi.DateParameter(default=datetime.date.today())
 
-    @property
-    def _root_url(self):
-        """Returns appropriate Paypal API root URL, depending on mode."""
-        if self.client_mode == 'sandbox':
-            return "https://api.sandbox.paypal.com"
-        else:
-            return "https://api.paypal.com"
-
-    def get_access_token(self):
-        """Requests an access token from Paypal API."""
-        url = "{}/v1/oauth2/token".format(self._root_url)
-        headers = {
-            "Content-Type": "application/x-www-form-urlencoded",
-            "Accept": "application/json",
-            "Accept-Language": "en_US",
-            "User-Agent": "edx-analytics-pipeline",
-        }
-        data = "grant_type=client_credentials"
-        auth = (self.client_id, self.client_secret)
-
-        response = requests.post(url, auth=auth, headers=headers, data=data)
-        if response.status_code != requests.codes.ok:
-            raise Exception("Encountered status {} on request to Paypal for access token for {}".format(response.status_code, self.run_date))
-        reply = json.loads(response.content)
-        access_token = reply.get("access_token")
-        if access_token is None:
-            raise Exception("Failed to get access token on request to Paypal for {}".format(self.run_date))
-        access_token_type = reply.get("token_type")
-        return (access_token_type, access_token)
-        
-    def requires(self):
-        pass
-
-    def get_payment_history(self, request_params):
-        """
-        Queries Paypal payment REST API for payment history.
-
-        Request parameters can be used to specify start and end times, and paging count.
-
-        Returns information about payments as a dict.
-        """
-        url = "{}/v1/payments/payment".format(self._root_url)
-        auth = (self.client_id, self.client_secret)
-        headers = {
-            "Authorization": ("%s %s" % self.get_access_token()),
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-            "Accept-Language": "en_US",
-            "User-Agent": "edx-analytics-pipeline",
-        }
-
-        response = requests.get(url, headers=headers, params=request_params)
-        if response.status_code != requests.codes.ok:
-            raise Exception("Encountered status {} on request to Paypal for payments for {}".format(response.status_code, self.run_date))
-        payment_history = json.loads(response.content)
-        return payment_history
+    def initialize(self):
+        print "initializing paypalrestsdk"
+        paypalrestsdk.configure({
+            'mode': self.client_mode,
+            'client_id': self.client_id,
+            'client_secret': self.client_secret
+        })
 
     def run(self):
+        print "running paypalrestsdk"
+        self.initialize()
         self.remove_output_on_overwrite()
         all_payments = []
 
         end_date = self.run_date + datetime.timedelta(days=1)
         # Maximum number to request at any time is 20.
-        request_params = {
+        request_args = {
             'start_time': "{}T00:00:00Z".format(self.run_date.isoformat()),  # pylint: disable=no-member
             'end_time': "{}T00:00:00Z".format(end_date.isoformat()),
             'count': 10
         }
-        print "request_params = {}".format(request_params)
 
-        payment_history = self.get_payment_history(request_params)
-
-        if payment_history.get('payments') is None:
+        payment_history = paypalrestsdk.Payment.all(request_args)
+        if payment_history.payments is None:
             # TODO: log error
             pass
         else:
-            print "Found {} payments".format(payment_history.get('count'))
-            if payment_history.get('count') != len(payment_history.get('payments')):
+            print "Found {} payments".format(payment_history.count)
+            if payment_history.count != len(payment_history.payments):
                 # TODO: log error
                 print "BADDD!!!!"
-            for payment in payment_history.get('payments'):
+            for payment in payment_history.payments:
                 all_payments.append(payment)
 
-        while payment_history.get('next_id') is not None:
-            request_params['start_id'] = payment_history.get('next_id')
-            payment_history = self.get_payment_history(request_params)
-            print "Found {} payments".format(payment_history.get('count'))
-            for payment in payment_history.get('payments'):
+        while payment_history.next_id is not None:
+            request_args['start_id'] = payment_history.next_id
+            payment_history = paypalrestsdk.Payment.all(request_args)
+            print "Found {} payments".format(payment_history.count)
+            for payment in payment_history.payments:
                 all_payments.append(payment)
 
         with self.output().open('w') as output_file:
             for payment in all_payments:
-                self.output_payment_from_dict(payment, output_file)
+                self.output_payment(payment, output_file)
 
-    def output_payment_from_dict(self, payment, output_file):
+    def output_payment(self, payment, output_file):
         """
         Extracts relevant payment information and writes to output file as TSV.
 
@@ -273,17 +228,20 @@ class SinglePullFromPaypalTask(PullFromPaypalTaskMixin, luigi.Task):
         row = []
         row.append("unknown")
         row.append("unknown")
-        row.append(payment.get('update_time'))
+        row.append(payment.update_time)
         row.append("unknown")
         row.append("unknown")
-        row.append(payment.get('id'))
-        row.append(payment.get('payer',{}).get('payment_method'))
-        row.append(payment.get('transactions')[0].get('amount').get('currency'))
-        row.append(payment.get('transactions')[0].get('amount').get('total'))
-        row.append(payment.get('intent'))
+        row.append(payment.id)
+        row.append(payment.payer.payment_method)
+        row.append(payment.transactions[0].amount.currency)
+        row.append(payment.transactions[0].amount.total)
+        row.append(payment.intent)
 
         output_file.write('\t'.join(row))
         output_file.write('\n')
+
+    def requires(self):
+        pass
 
     def output(self):
         date_string = self.run_date.strftime('%Y-%m-%d')  # pylint: disable=no-member
