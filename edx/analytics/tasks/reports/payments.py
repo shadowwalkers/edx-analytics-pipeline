@@ -4,13 +4,11 @@ import csv
 import datetime
 import logging
 import requests
-import StringIO
 import luigi
-import paypalrestsdk
 
 from edx.analytics.tasks.url import get_target_from_url
 from edx.analytics.tasks.url import url_path_join
-from edx.analytics.tasks.util.hive import HivePartition
+from edx.analytics.tasks.util.hive import HivePartition, WarehouseMixin
 from edx.analytics.tasks.util.overwrite import OverwriteOutputMixin
 
 # Tell urllib3 to switch the ssl backend to PyOpenSSL.
@@ -21,7 +19,8 @@ urllib3.contrib.pyopenssl.inject_into_urllib3()
 log = logging.getLogger(__name__)
 
 
-class PullFromCybersourceTaskMixin(OverwriteOutputMixin):
+class PullFromCybersourceTaskMixin(OverwriteOutputMixin, WarehouseMixin):
+    """Define common parameters for Cybersource pull and downstream tasks."""
 
     host = luigi.Parameter(
         default_from_config={'section': 'cybersource', 'name': 'host'}
@@ -41,20 +40,23 @@ class PullFromCybersourceTaskMixin(OverwriteOutputMixin):
 
 class SinglePullFromCybersourceTask(PullFromCybersourceTaskMixin, luigi.Task):
     """
-    A task that reads out of a remote Cybersource account and writes to a file in TSV format.
+    A task that reads out of a remote Cybersource account and writes to a file.
 
-    A complication is that this needs to be performed with more than one account.
+    A complication is that this needs to be performed with more than one account
+    (or merchant_id), with potentially different credentials.  If possible, create
+    the same credentials (username, password) for each account.
 
-    Inputs also include the interval over which to request daily dumps.
+    Pulls are made for only a single day.  This is what Cybersource supports, and
+    it makes an incremental pull system a logical outcome.
 
-    Output should be incremental.  That is, this task can be run periodically with
-    contiguous time intervals requested, and the output should properly accumulate.
-    Output is therefore in the form {output_root}/dt={date}/cybersource_{merchant}.tsv
+    Output is in the form {output_root}/dt={CCYY-mm}/cybersource_{merchant}_{CCYYmmdd}.tsv
     """
-    output_root = luigi.Parameter()
     run_date = luigi.DateParameter(default=datetime.date.today())
 
-    REPORT_NAME = 'PaymentBatchDetailReport'
+    # This is the table that we had been using for gathering and
+    # storing historical Cybersource data.  It adds one additional
+    # column over the 'PaymentBatchDetailReport' format.
+    REPORT_NAME = 'PaymentSubmissionDetailReport'
     REPORT_FORMAT = 'csv'
 
     def requires(self):
@@ -64,22 +66,18 @@ class SinglePullFromCybersourceTask(PullFromCybersourceTaskMixin, luigi.Task):
         self.remove_output_on_overwrite()
         auth = (self.username, self.password)
         response = requests.get(self.query_url, auth=auth)
-        if response.status_code != requests.codes.ok:
-            raise Exception("Encountered status {} on request to Cybersource for {}".format(response.status_code, self.run_date))
+        if response.status_code != requests.codes.ok:  # pylint: disable=no-member
+            msg = "Encountered status {} on request to Cybersource for {}".format(response.status_code, self.run_date)
+            raise Exception(msg)
 
-        data = StringIO.StringIO(response.content)
-        _download_header = data.readline()
-        reader = csv.reader(data, delimiter=',')
         with self.output().open('w') as output_file:
-            for row in reader:
-                output_file.write('\t'.join(row))
-                output_file.write('\n')
+            output_file.write(response.content)
 
     def output(self):
-        date_string = self.run_date.strftime('%Y-%m-%d')  # pylint: disable=no-member
-        partition_path_spec = HivePartition('dt', date_string).path_spec
-        filename = "cybersource_{}.tsv".format(self.merchant_id)
-        url_with_filename = url_path_join(self.output_root, partition_path_spec, filename)
+        month_year_string = self.run_date.strftime('%Y-%m')  # pylint: disable=no-member
+        date_string = self.run_date.strftime('%Y%m%d')  # pylint: disable=no-member
+        filename = "cybersource_{}_{}.tsv".format(self.merchant_id, date_string)
+        url_with_filename = url_path_join(self.warehouse_path, "cybersource", month_year_string, filename)
         return get_target_from_url(url_with_filename)
 
     @property
@@ -95,11 +93,68 @@ class SinglePullFromCybersourceTask(PullFromCybersourceTaskMixin, luigi.Task):
         return url
 
 
+class SingleProcessFromCybersourceTask(PullFromCybersourceTaskMixin, luigi.Task):
+    """
+    A task that reads out of a remote Cybersource account and writes to a file in TSV format.
+
+    A complication is that this needs to be performed with more than one account.
+
+    Inputs also include the interval over which to request daily dumps.
+
+    Output should be incremental.  That is, this task can be run periodically with
+    contiguous time intervals requested, and the output should properly accumulate.
+    Output is therefore in the form {output_root}/dt={date}/cybersource_{merchant}.tsv
+    """
+    run_date = luigi.DateParameter(default=datetime.date.today())
+
+    def requires(self):
+        args = {
+            'run_date': self.run_date,
+            'host': self.host,
+            'merchant_id': self.merchant_id,
+            'username': self.username,
+            'password': self.password,
+            'warehouse_path': self.warehouse_path,
+            'overwrite': self.overwrite,
+        }
+        return SinglePullFromCybersourceTask(**args)
+
+    def run(self):
+        # Read from input and reformat for output.
+        self.remove_output_on_overwrite()
+        with self.input().open('r') as input_file:
+            # Skip the first line, which provides information about the source
+            # of the file.  The second line should be define the column headings.
+            _download_header = input_file.readline()
+            reader = csv.DictReader(input_file, delimiter=',')
+            with self.output().open('w') as output_file:
+                for row in reader:
+                    result = [
+                        'cybersource',
+                        row['merchant_id'],
+                        row['batch_date'],
+                        row['merchant_ref_number'],  # should equal order_id
+                        row['currency'],
+                        row['amount'],
+                        row['transaction_type'],
+                        row['payment_method'],
+                    ]
+                    output_file.write('\t'.join(result))
+                    output_file.write('\n')
+
+    def output(self):
+        # Set up output so that it can be read in as a Hive table with partitions.
+        date_string = self.run_date.strftime('%Y-%m-%d')  # pylint: disable=no-member
+        partition_path_spec = HivePartition('dt', date_string).path_spec
+        filename = "cybersource_{}.tsv".format(self.merchant_id)
+        url_with_filename = url_path_join(self.warehouse_path, "payments", partition_path_spec, filename)
+        return get_target_from_url(url_with_filename)
+
+
 class IntervalPullFromCybersourceTask(PullFromCybersourceTaskMixin, luigi.Task):
     """Determines a set of dates to pull, and requires them."""
 
     interval = luigi.DateIntervalParameter()
-    output_root = luigi.Parameter()
 
     required_tasks = None
 
@@ -112,169 +167,16 @@ class IntervalPullFromCybersourceTask(PullFromCybersourceTaskMixin, luigi.Task):
             'merchant_id': self.merchant_id,
             'username': self.username,
             'password': self.password,
-            'output_root': self.output_root,
+            'warehouse_path': self.warehouse_path,
             'overwrite': self.overwrite,
         }
 
         current_date = start_date
         while current_date < end_date:
             args['run_date'] = current_date
-            task = SinglePullFromCybersourceTask(**args)
-            if not task.complete():
-                yield task
-            current_date += datetime.timedelta(days=1)
-
-    def requires(self):
-        if not self.required_tasks:
-            self.required_tasks = [task for task in self._get_required_tasks()]
-
-        return self.required_tasks
-
-    def output(self):
-        return [task.output() for task in self.requires()]
-
-
-class PullFromPaypalTaskMixin(OverwriteOutputMixin):
-
-    client_mode = luigi.Parameter(
-        default_from_config={'section': 'paypal', 'name': 'client_mode'}
-    )
-    client_id = luigi.Parameter(
-        default_from_config={'section': 'paypal', 'name': 'client_id'}
-    )
-    # Making this 'insignificant' means it won't be echoed in log files.
-    client_secret = luigi.Parameter(
-        default_from_config={'section': 'paypal', 'name': 'client_secret'},
-        significant=False,
-    )
-
-
-class SinglePullFromPaypalTask(PullFromPaypalTaskMixin, luigi.Task):
-    """
-    A task that reads out of a remote Paypal account and writes to a file in TSV format.
-
-    A complication is that this needs to be performed with more than one account.
-
-    Inputs also include the interval over which to request daily dumps.
-
-    Output should be incremental.  That is, this task can be run periodically with
-    contiguous time intervals requested, and the output should properly accumulate.
-    Output is therefore in the form {output_root}/dt={date}/paypal_{merchant}.tsv
-    """
-    output_root = luigi.Parameter()
-    run_date = luigi.DateParameter(default=datetime.date.today())
-
-    def initialize(self):
-        print "initializing paypalrestsdk"
-        paypalrestsdk.configure({
-            'mode': self.client_mode,
-            'client_id': self.client_id,
-            'client_secret': self.client_secret
-        })
-
-    def run(self):
-        print "running paypalrestsdk"
-        self.initialize()
-        self.remove_output_on_overwrite()
-        all_payments = []
-
-        end_date = self.run_date + datetime.timedelta(days=1)
-        # Maximum number to request at any time is 20.
-        request_args = {
-            'start_time': "{}T00:00:00Z".format(self.run_date.isoformat()),  # pylint: disable=no-member
-            'end_time': "{}T00:00:00Z".format(end_date.isoformat()),
-            'count': 10
-        }
-
-        payment_history = paypalrestsdk.Payment.all(request_args)
-        if payment_history.payments is None:
-            # TODO: log error
-            pass
-        else:
-            print "Found {} payments".format(payment_history.count)
-            if payment_history.count != len(payment_history.payments):
-                # TODO: log error
-                print "BADDD!!!!"
-            for payment in payment_history.payments:
-                all_payments.append(payment)
-
-        while payment_history.next_id is not None:
-            request_args['start_id'] = payment_history.next_id
-            payment_history = paypalrestsdk.Payment.all(request_args)
-            print "Found {} payments".format(payment_history.count)
-            for payment in payment_history.payments:
-                all_payments.append(payment)
-
-        with self.output().open('w') as output_file:
-            for payment in all_payments:
-                self.output_payment(payment, output_file)
-
-    def output_payment(self, payment, output_file):
-        """
-        Extracts relevant payment information and writes to output file as TSV.
-
-        Rows:
-            batch_id              ?
-            merchant_id           ?
-            batch_date            payment.update_time
-            request_id            ?
-            merchant_ref_number   ?
-            trans_ref_no          payment.id
-            payment_method        payment.payer.payment_method
-            currency              payment.transactions[0].amount.currency
-            amount                payment.transactions[0].amount.total
-            transaction_type      payment.intent
-        """
-        row = []
-        row.append("unknown")
-        row.append("unknown")
-        row.append(payment.update_time)
-        row.append("unknown")
-        row.append("unknown")
-        row.append(payment.id)
-        row.append(payment.payer.payment_method)
-        row.append(payment.transactions[0].amount.currency)
-        row.append(payment.transactions[0].amount.total)
-        row.append(payment.intent)
-
-        output_file.write('\t'.join(row))
-        output_file.write('\n')
-
-    def requires(self):
-        pass
-
-    def output(self):
-        date_string = self.run_date.strftime('%Y-%m-%d')  # pylint: disable=no-member
-        partition_path_spec = HivePartition('dt', date_string).path_spec
-        filename = "paypal_{}.tsv".format(self.client_mode)
-        url_with_filename = url_path_join(self.output_root, partition_path_spec, filename)
-        return get_target_from_url(url_with_filename)
-
-
-class IntervalPullFromPaypalTask(PullFromPaypalTaskMixin, luigi.Task):
-    """Determines a set of dates to pull, and requires them."""
-
-    interval = luigi.DateIntervalParameter()
-    output_root = luigi.Parameter()
-
-    required_tasks = None
-
-    def _get_required_tasks(self):
-        """Internal method to actually calculate required tasks once."""
-        start_date = self.interval.date_a  # pylint: disable=no-member
-        end_date = self.interval.date_b  # pylint: disable=no-member
-        args = {
-            'client_mode': self.client_mode,
-            'client_id': self.client_id,
-            'client_secret': self.client_secret,
-            'output_root': self.output_root,
-            'overwrite': self.overwrite,
-        }
-
-        current_date = start_date
-        while current_date < end_date:
-            args['run_date'] = current_date
-            task = SinglePullFromPaypalTask(**args)
+            task = SingleProcessFromCybersourceTask(**args)
+            # To cut down on the number of tasks that Luigi has to deal with,
+            # screen out here the tasks that are already complete.
             if not task.complete():
                 yield task
             current_date += datetime.timedelta(days=1)
