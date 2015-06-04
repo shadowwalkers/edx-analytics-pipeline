@@ -38,7 +38,7 @@ class PullFromCybersourceTaskMixin(OverwriteOutputMixin, WarehouseMixin):
     )
 
 
-class SinglePullFromCybersourceTask(PullFromCybersourceTaskMixin, luigi.Task):
+class DailyPullFromCybersourceTask(PullFromCybersourceTaskMixin, luigi.Task):
     """
     A task that reads out of a remote Cybersource account and writes to a file.
 
@@ -46,10 +46,10 @@ class SinglePullFromCybersourceTask(PullFromCybersourceTaskMixin, luigi.Task):
     (or merchant_id), with potentially different credentials.  If possible, create
     the same credentials (username, password) for each account.
 
-    Pulls are made for only a single day.  This is what Cybersource supports, and
-    it makes an incremental pull system a logical outcome.
+    Pulls are made for only a single day.  This is what Cybersource
+    supports for these reports, and it allows runs to performed
+    incrementally on a daily tempo.
 
-    Output is in the form {output_root}/dt={CCYY-mm}/cybersource_{merchant}_{CCYYmmdd}.tsv
     """
     run_date = luigi.DateParameter(default=datetime.date.today())
 
@@ -74,14 +74,20 @@ class SinglePullFromCybersourceTask(PullFromCybersourceTaskMixin, luigi.Task):
             output_file.write(response.content)
 
     def output(self):
+        """Output is in the form {warehouse_path}/cybersource/{CCYY-mm}/cybersource_{merchant}_{CCYYmmdd}.csv"""
         month_year_string = self.run_date.strftime('%Y-%m')  # pylint: disable=no-member
         date_string = self.run_date.strftime('%Y%m%d')  # pylint: disable=no-member
-        filename = "cybersource_{}_{}.tsv".format(self.merchant_id, date_string)
+        filename = "cybersource_{merchant_id}_{date_string}.{report_format}".format(
+            merchant_id=self.merchant_id,
+            date_string=date_string,
+            report_format=self.REPORT_FORMAT,
+        )
         url_with_filename = url_path_join(self.warehouse_path, "cybersource", month_year_string, filename)
         return get_target_from_url(url_with_filename)
 
     @property
     def query_url(self):
+        """Generate the url to download a report from a Cybersource account."""
         slashified_date = self.run_date.strftime('%Y/%m/%d')  # pylint: disable=no-member
         url = 'https://{host}/DownloadReport/{date}/{merchant_id}/{report_name}.{report_format}'.format(
             host=self.host,
@@ -93,17 +99,13 @@ class SinglePullFromCybersourceTask(PullFromCybersourceTaskMixin, luigi.Task):
         return url
 
 
-class SingleProcessFromCybersourceTask(PullFromCybersourceTaskMixin, luigi.Task):
+class DailyProcessFromCybersourceTask(PullFromCybersourceTaskMixin, luigi.Task):
     """
-    A task that reads out of a remote Cybersource account and writes to a file in TSV format.
+    A task that reads a local file generated from a daily Cybersource pull, and writes to a TSV file.
 
-    A complication is that this needs to be performed with more than one account.
+    The output file should be readable by Hive, and be in a common format across
+    other payment accounts.
 
-    Inputs also include the interval over which to request daily dumps.
-
-    Output should be incremental.  That is, this task can be run periodically with
-    contiguous time intervals requested, and the output should properly accumulate.
-    Output is therefore in the form {output_root}/dt={date}/cybersource_{merchant}.tsv
     """
     run_date = luigi.DateParameter(default=datetime.date.today())
 
@@ -117,14 +119,14 @@ class SingleProcessFromCybersourceTask(PullFromCybersourceTaskMixin, luigi.Task)
             'warehouse_path': self.warehouse_path,
             'overwrite': self.overwrite,
         }
-        return SinglePullFromCybersourceTask(**args)
+        return DailyPullFromCybersourceTask(**args)
 
     def run(self):
         # Read from input and reformat for output.
         self.remove_output_on_overwrite()
         with self.input().open('r') as input_file:
             # Skip the first line, which provides information about the source
-            # of the file.  The second line should be define the column headings.
+            # of the file.  The second line should define the column headings.
             _download_header = input_file.readline()
             reader = csv.DictReader(input_file, delimiter=',')
             with self.output().open('w') as output_file:
@@ -143,7 +145,11 @@ class SingleProcessFromCybersourceTask(PullFromCybersourceTaskMixin, luigi.Task)
                     output_file.write('\n')
 
     def output(self):
-        # Set up output so that it can be read in as a Hive table with partitions.
+        """
+        Output is set up so it can be read in as a Hive table with partitions.
+
+        The form is {warehouse_path}/payments/dt={CCYY-mm-dd}/cybersource_{merchant}.tsv
+        """
         date_string = self.run_date.strftime('%Y-%m-%d')  # pylint: disable=no-member
         partition_path_spec = HivePartition('dt', date_string).path_spec
         filename = "cybersource_{}.tsv".format(self.merchant_id)
@@ -174,7 +180,7 @@ class IntervalPullFromCybersourceTask(PullFromCybersourceTaskMixin, luigi.Task):
         current_date = start_date
         while current_date < end_date:
             args['run_date'] = current_date
-            task = SingleProcessFromCybersourceTask(**args)
+            task = DailyProcessFromCybersourceTask(**args)
             # To cut down on the number of tasks that Luigi has to deal with,
             # screen out here the tasks that are already complete.
             if not task.complete():
