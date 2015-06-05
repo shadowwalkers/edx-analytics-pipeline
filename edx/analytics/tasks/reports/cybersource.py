@@ -19,7 +19,7 @@ urllib3.contrib.pyopenssl.inject_into_urllib3()
 log = logging.getLogger(__name__)
 
 
-class PullFromCybersourceTaskMixin(OverwriteOutputMixin, WarehouseMixin):
+class PullFromCybersourceTaskMixin(OverwriteOutputMixin):
     """Define common parameters for Cybersource pull and downstream tasks."""
 
     host = luigi.Parameter(
@@ -36,6 +36,8 @@ class PullFromCybersourceTaskMixin(OverwriteOutputMixin, WarehouseMixin):
         default_from_config={'section': 'cybersource', 'name': 'password'},
         significant=False,
     )
+    # URL of location to write output.
+    output_root = luigi.Parameter()
 
 
 class DailyPullFromCybersourceTask(PullFromCybersourceTaskMixin, luigi.Task):
@@ -51,6 +53,7 @@ class DailyPullFromCybersourceTask(PullFromCybersourceTaskMixin, luigi.Task):
     incrementally on a daily tempo.
 
     """
+    # Date to fetch Cybersource report.
     run_date = luigi.DateParameter(default=datetime.date.today())
 
     # This is the table that we had been using for gathering and
@@ -74,7 +77,7 @@ class DailyPullFromCybersourceTask(PullFromCybersourceTaskMixin, luigi.Task):
             output_file.write(response.content)
 
     def output(self):
-        """Output is in the form {warehouse_path}/cybersource/{CCYY-mm}/cybersource_{merchant}_{CCYYmmdd}.csv"""
+        """Output is in the form {output_root}/cybersource/{CCYY-mm}/cybersource_{merchant}_{CCYYmmdd}.csv"""
         month_year_string = self.run_date.strftime('%Y-%m')  # pylint: disable=no-member
         date_string = self.run_date.strftime('%Y%m%d')  # pylint: disable=no-member
         filename = "cybersource_{merchant_id}_{date_string}.{report_format}".format(
@@ -82,7 +85,7 @@ class DailyPullFromCybersourceTask(PullFromCybersourceTaskMixin, luigi.Task):
             date_string=date_string,
             report_format=self.REPORT_FORMAT,
         )
-        url_with_filename = url_path_join(self.warehouse_path, "cybersource", month_year_string, filename)
+        url_with_filename = url_path_join(self.output_root, "cybersource", month_year_string, filename)
         return get_target_from_url(url_with_filename)
 
     @property
@@ -107,7 +110,11 @@ class DailyProcessFromCybersourceTask(PullFromCybersourceTaskMixin, luigi.Task):
     other payment accounts.
 
     """
+    # Date to fetch Cybersource report.
     run_date = luigi.DateParameter(default=datetime.date.today())
+
+    # URL of location to write output.
+    output_root = luigi.Parameter()
 
     def requires(self):
         args = {
@@ -116,7 +123,7 @@ class DailyProcessFromCybersourceTask(PullFromCybersourceTaskMixin, luigi.Task):
             'merchant_id': self.merchant_id,
             'username': self.username,
             'password': self.password,
-            'warehouse_path': self.warehouse_path,
+            'output_root': self.output_root,
             'overwrite': self.overwrite,
         }
         return DailyPullFromCybersourceTask(**args)
@@ -148,19 +155,25 @@ class DailyProcessFromCybersourceTask(PullFromCybersourceTaskMixin, luigi.Task):
         """
         Output is set up so it can be read in as a Hive table with partitions.
 
-        The form is {warehouse_path}/payments/dt={CCYY-mm-dd}/cybersource_{merchant}.tsv
+        The form is {output_root}/payments/dt={CCYY-mm-dd}/cybersource_{merchant}.tsv
         """
         date_string = self.run_date.strftime('%Y-%m-%d')  # pylint: disable=no-member
         partition_path_spec = HivePartition('dt', date_string).path_spec
         filename = "cybersource_{}.tsv".format(self.merchant_id)
-        url_with_filename = url_path_join(self.warehouse_path, "payments", partition_path_spec, filename)
+        url_with_filename = url_path_join(self.output_root, "payments", partition_path_spec, filename)
         return get_target_from_url(url_with_filename)
 
 
-class IntervalPullFromCybersourceTask(PullFromCybersourceTaskMixin, luigi.Task):
+class IntervalPullFromCybersourceTask(PullFromCybersourceTaskMixin, WarehouseMixin, luigi.Task):
     """Determines a set of dates to pull, and requires them."""
 
     interval = luigi.DateIntervalParameter()
+
+    def __init__(self, *args, **kwargs):
+        super(IntervalPullFromCybersourceTask, self).__init__(*args, **kwargs)
+        # Provide default for output_root at this level.
+        if self.output_root is None:
+            self.output_root = self.warehouse_path
 
     required_tasks = None
 
@@ -173,7 +186,7 @@ class IntervalPullFromCybersourceTask(PullFromCybersourceTaskMixin, luigi.Task):
             'merchant_id': self.merchant_id,
             'username': self.username,
             'password': self.password,
-            'warehouse_path': self.warehouse_path,
+            'output_root': self.warehouse_path,
             'overwrite': self.overwrite,
         }
 
