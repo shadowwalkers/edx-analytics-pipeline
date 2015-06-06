@@ -415,7 +415,7 @@ class ImportShoppingCartDonation(ImportMysqlToHiveTableTask):
 
 
 class ImportShoppingCartCourseRegistrationCodeItem(ImportMysqlToHiveTableTask):
-    """Imports course registration codes from an external LMS DB shopping cart table to a destination directory."""
+    """Imports course registration codes from an external ecommerce table to a destination directory."""
 
     @property
     def table_name(self):
@@ -427,6 +427,357 @@ class ImportShoppingCartCourseRegistrationCodeItem(ImportMysqlToHiveTableTask):
             ('orderitem_ptr_id', 'INT'),
             ('course_id', 'STRING'),
             ('mode', 'STRING'),
+        ]
+
+
+class ImportProductCatalog(ImportMysqlToHiveTableTask):
+    """Ecommerce: Products: Imports product catalog from an external ecommerce table to a destination dir."""
+
+    @property
+    def table_name(self):
+        return 'catalogue_product'
+
+    @property
+    def columns(self):
+        return [
+            ('id', 'INT'),
+            ('structure', 'STRING'),
+            ('upc', 'STRING'),
+            ('title', 'STRING'),
+            ('slug', 'STRING'),
+            ('description', 'STRING'),
+            ('rating', 'STRING'),
+            ('date_created', 'TIMESTAMP'),
+            ('date_updated', 'TIMESTAMP'),
+            ('is_discountable', 'STRING'),
+            ('parent_id', 'INT'),
+            ('product_class_id', 'INT'),
+        ]
+
+
+class ImportProductCatalogAttributes(ImportMysqlToHiveTableTask):
+    """Ecommerce: Products: Imports product catalog attributes from an external ecommerce table to a destination dir."""
+
+    @property
+    def table_name(self):
+        return 'catalogue_productattribute'
+
+    @property
+    def columns(self):
+        return [
+            ('id', 'INT'),
+            ('name', 'STRING'),
+            ('code', 'STRING'),
+            ('type', 'varchar(20)'),
+            ('required', 'inyint(1)'),
+            ('option_group_id', 'INT'),
+            ('product_class_id', 'INT'),
+        ]
+
+
+class ImportProductCatalogAttributeValues(ImportMysqlToHiveTableTask):
+    """Ecommerce: Products: Imports product catalog attribute values from an external ecommerce table to a dest dir."""
+
+    @property
+    def table_name(self):
+        return 'catalogue_productattributevalue'
+
+    @property
+    def columns(self):
+        return [
+            ('id', 'INT'),
+            ('value_text', 'longtex'),
+            ('value_integer', 'INT'),
+            ('value_boolean', 'INT'),
+            ('value_float', 'STRING'),
+            ('value_richtex', 'STRING'),
+            ('value_date', 'TIMESTAMP'),
+            ('value_file', 'STRING'),
+            ('value_image', 'STRING'),
+            ('entity_object_id', 'INT'),
+            ('attribute_id', 'INT'),
+            ('entity_content_type_id', 'INT'),
+            ('product_id', 'INT'),
+            ('value_option_id', 'INT'),
+        ]
+
+
+class ImportOrderOrderHistory(ImportMysqlToHiveTableTask):
+    """Ecommerce: History: Imports order history from an ecommerce table to a destination directory."""
+
+    @property
+    def table_name(self):
+        return 'order_historicalorder'
+
+    @property
+    def columns(self):
+        return [
+            ('id', 'INT'),
+            ('number', 'STRING'),
+            ('currency', 'STRING'),
+            ('total_incl_tax', 'STRING'),
+            ('total_excl_tax', 'STRING'),
+            ('shipping_incl_tax', 'STRING'),
+            ('shipping_excl_tax', 'STRING'),
+            ('shipping_method', 'STRING'),
+            ('shipping_code', 'STRING'),
+            ('status', 'STRING'),
+            ('guest_email', 'STRING'),
+            ('date_placed', 'TIMESTAMP'),
+            ('history_id', 'INT'),
+            ('history_date', 'TIMESTAMP'),
+            ('history_type', 'STRING'),
+            ('basket_id', 'INT'),
+            ('billing_address_id', 'INT'),
+            ('history_user_id', 'INT'),
+            ('shipping_address_id', 'INT'),
+            ('site_id', 'INT'),
+            ('user_id', 'INT'),
+        ]
+
+
+class ImportOrderHistoricalLine(ImportMysqlToHiveTableTask):
+    """Ecommerce: History: Imports order history line items from an ecommerce table to a destination directory."""
+
+    @property
+    def table_name(self):
+        return 'order_historicalline'
+
+    @property
+    def columns(self):
+        return [
+            ('id', 'INT'),
+            ('partner_name', 'STRING'),
+            ('partner_sku', 'STRING'),
+            ('partner_line_reference', 'STRING'),
+            ('partner_line_notes', 'STRING'),
+            ('title', 'STRING'),
+            ('upc', 'STRING'),
+            ('quantity', 'INT'),
+            ('line_price_incl_tax', 'STRING'),
+            ('line_price_excl_tax', 'STRING'),
+            ('line_price_before_discounts_incl_tax', 'STRING'),
+            ('line_price_before_discounts_excl_tax', 'STRING'),
+            ('unit_cost_price', 'STRING'),
+            ('unit_price_incl_tax', 'STRING'),
+            ('unit_price_excl_tax', 'STRING'),
+            ('unit_retail_price', 'STRING'),
+            ('status', 'STRING'),
+            ('est_dispatch_date', 'TIMESTAMP    '),
+            ('history_id', 'INT'),
+            ('history_date', 'TIMESTAMP'),
+            ('history_type', 'STRING'),
+            ('history_user_id', 'INT'),
+            ('order_id', 'INT'),
+            ('partner_id', 'INT'),
+            ('product_id', 'INT'),
+            ('stockrecord_id', 'INT'),
+        ]
+
+
+class ImportCurrentBasketState(ImportMysqlToHiveTableTask):
+    """Ecommerce: Current: Imports current basket line items from an ecommerce table to a destination directory."""
+
+    @property
+    def table_name(self):
+        return 'basket_basket'
+
+    @property
+    def columns(self):
+        return [
+            ('id', 'INT'),
+            ('status', 'STRING'),
+            ('date_created', 'TIMESTAMP'),
+            ('date_merged', 'TIMESTAMP'),
+            ('date_submitted', 'TIMESTAMP'),
+            ('owner_id', 'INT'),
+        ]
+
+
+class ImportCurrentOrderState(ImportMysqlToHiveTableTask):
+    """Ecommerce Current: Imports current order line items from an ecommerce table to a destination directory."""
+
+    @property
+    def table_name(self):
+        return 'order_order'
+
+    @property
+    def columns(self):
+        return [
+            ('id', 'INT'),
+            ('number', 'STRING'),
+            ('currency', 'STRING'),
+            ('total_incl_tax', 'STRING'),
+            ('total_excl_tax', 'STRING'),
+            ('shipping_incl_tax', 'STRING'),
+            ('shipping_excl_tax', 'STRING'),
+            ('shipping_method', 'STRING'),
+            ('shipping_code', 'STRING'),
+            ('status', 'STRING'),
+            ('guest_email', 'STRING'),
+            ('date_placed', 'TIMESTAMP'),
+            ('basket_id', 'INT'),
+            ('billing_address_id', 'INT'),
+            ('shipping_address_id', 'INT'),
+            ('site_id', 'INT'),
+            ('user_id', 'INT'),
+        ]
+
+
+class ImportCurrentOrderLineState(ImportMysqlToHiveTableTask):
+    """Ecommerce: Current: Imports current order line items from an ecommerce table to a destination directory."""
+
+    @property
+    def table_name(self):
+        return 'order_line'
+
+    @property
+    def columns(self):
+        return [
+            ('id', 'INT'),
+            ('partner_name', 'STRING'),
+            ('partner_sku', 'STRING'),
+            ('partner_line_reference', 'STRING'),
+            ('partner_line_notes', 'STRING'),
+            ('title', 'STRING'),
+            ('upc', 'STRING'),
+            ('quantity', 'INT'),
+            ('line_price_incl_tax', 'STRING'),
+            ('line_price_excl_tax', 'STRING'),
+            ('line_price_before_discounts_incl_tax', 'STRING'),
+            ('line_price_before_discounts_excl_tax', 'STRING'),
+            ('unit_cost_price', 'STRING'),
+            ('unit_price_incl_tax', 'STRING'),
+            ('unit_price_excl_tax', 'STRING'),
+            ('unit_retail_price', 'STRING'),
+            ('status', 'STRING'),
+            ('est_dispatch_date', 'TIMESTAMP'),
+            ('order_id', 'INT'),
+            ('partner_id', 'INT'),
+            ('product_id', 'INT'),
+            ('stockrecord_id', 'INT'),
+        ]
+
+
+class ImportCurrentOrderLineAttributeState(ImportMysqlToHiveTableTask):
+    """Ecommerce: Current: Imports current order line attributes from an ecommerce table to a destination directory."""
+
+    @property
+    def table_name(self):
+        return 'order_lineattribute'
+
+    @property
+    def columns(self):
+        return [
+            ('id', 'INT'),
+            ('type', 'STRING'),
+            ('value', 'STRING'),
+            ('line_id', 'INT'),
+            ('option_id', 'INT'),
+        ]
+
+
+class ImportCurrentOrderLinePriceState(ImportMysqlToHiveTableTask):
+    """Ecommerce: Current: Imports current order line price items from an ecommerce table to a destination dir."""
+
+    @property
+    def table_name(self):
+        return 'order_lineprice'
+
+    @property
+    def columns(self):
+        return [
+            ('id', 'INT'),
+            ('quantity', 'INT'),
+            ('price_incl_tax', 'STRING'),
+            ('price_excl_tax', 'STRING'),
+            ('shipping_incl_tax', 'STRING'),
+            ('shipping_excl_tax', 'STRING'),
+            ('line_id', 'INT'),
+            ('order_id', 'INT'),
+        ]
+
+
+class ImportOrderPaymentEvent(ImportMysqlToHiveTableTask):
+    """Ecommerce: Payment: Imports order payment events from an ecommerce table to a destination dir."""
+
+    @property
+    def table_name(self):
+        return 'order_paymentevent'
+
+    @property
+    def columns(self):
+        return [
+            ('id', 'INT'),
+            ('amount', 'STRING'),
+            ('reference', 'STRING'),
+            ('date_created', 'TIMESTAMP'),
+            ('event_type_id', 'INT'),
+            ('order_id', 'INT'),
+            ('shipping_event_id', 'INT'),
+            ('processor_name', 'STRING'),
+        ]
+
+
+class ImportPaymentSource(ImportMysqlToHiveTableTask):
+    """Ecommerce: Payment: Imports payment source information from an ecommerce table to a destination dir."""
+
+    @property
+    def table_name(self):
+        return 'payment_source'
+
+    @property
+    def columns(self):
+        return [
+            ('id', 'INT'),
+            ('currency', 'STRING'),
+            ('amount_allocated', 'STRING'),
+            ('amount_debited', 'STRING'),
+            ('amount_refunded', 'STRING'),
+            ('reference', 'STRING'),
+            ('label', 'STRING'),
+            ('order_id', 'INT'),
+            ('source_type_id', 'INT'),
+            ('card_type', 'STRING'),
+        ]
+
+
+class ImportPaymentTransactions(ImportMysqlToHiveTableTask):
+    """Ecommerce: Payment: Imports payment source information from an ecommerce table to a destination dir."""
+
+    @property
+    def table_name(self):
+        return 'payment_transaction'
+
+    @property
+    def columns(self):
+        return [
+            ('id', 'INT'),
+            ('txn_type', 'STRING'),
+            ('amount', 'STRING'),
+            ('reference', 'STRING'),
+            ('status', 'STRING'),
+            ('date_created', 'TIMESTAMP'),
+            ('source_id', 'INT'),
+        ]
+
+
+class ImportPaymentProcessorResponse(ImportMysqlToHiveTableTask):
+    """Ecommerce: Payment: Imports payment source information from an ecommerce table to a destination dir."""
+
+    @property
+    def table_name(self):
+        return 'payment_paymentprocessorresponse'
+
+    @property
+    def columns(self):
+        return [
+            ('id', 'INT'),
+            ('processor_name', 'STRING'),
+            ('transaction_id', 'STRING'),
+            ('response', 'STRING'),
+            ('created', 'TIMESTAMP'),
+            ('basket_id', 'INT'),
         ]
 
 

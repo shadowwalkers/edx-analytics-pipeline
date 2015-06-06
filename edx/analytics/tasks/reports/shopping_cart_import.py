@@ -11,7 +11,21 @@ from edx.analytics.tasks.database_imports import DatabaseImportMixin, \
     ImportShoppingCartDonation, \
     ImportShoppingCartOrder, \
     ImportShoppingCartOrderItem, \
-    ImportShoppingCartPaidCourseRegistration
+    ImportShoppingCartPaidCourseRegistration, \
+    ImportProductCatalog, \
+    ImportProductCatalogAttributes, \
+    ImportProductCatalogAttributeValues, \
+    ImportOrderOrderHistory, \
+    ImportOrderHistoricalLine, \
+    ImportCurrentBasketState, \
+    ImportCurrentOrderState, \
+    ImportCurrentOrderLineState, \
+    ImportCurrentOrderLineAttributeState, \
+    ImportCurrentOrderLinePriceState, \
+    ImportOrderPaymentEvent, \
+    ImportPaymentSource, \
+    ImportPaymentTransactions, \
+    ImportPaymentProcessorResponse
 
 
 class PullFromShoppingCartTablesTask(DatabaseImportMixin, OverwriteOutputMixin, luigi.WrapperTask):
@@ -34,6 +48,46 @@ class PullFromShoppingCartTablesTask(DatabaseImportMixin, OverwriteOutputMixin, 
             ImportShoppingCartPaidCourseRegistration(**kwargs),
             ImportShoppingCartDonation(**kwargs),
             ImportShoppingCartCourseRegistrationCodeItem(**kwargs),
+        )
+
+    def output(self):
+        return [task.output() for task in self.requires()]
+
+
+class PullFromEcommerceTablesTask(DatabaseImportMixin, OverwriteOutputMixin, luigi.WrapperTask):
+    """Imports a set of ecommerce tables from an external database into a destination directory."""
+
+    def requires(self):
+        kwargs = {
+            'destination': self.destination,
+            'credentials': self.credentials,
+            'num_mappers': self.num_mappers,
+            'verbose': self.verbose,
+            'import_date': self.import_date,
+            'overwrite': self.overwrite,
+        }
+        yield (
+            # Ecommerce Product Tables
+            ImportProductCatalog(**kwargs),
+            ImportProductCatalogAttributes(**kwargs),
+            ImportProductCatalogAttributeValues(**kwargs),
+
+            # Ecommerce Order History Tables
+            ImportOrderOrderHistory(**kwargs),
+            ImportOrderHistoricalLine(**kwargs),
+
+            # Ecommerce Current State and Line Item Tables
+            ImportCurrentBasketState(**kwargs),
+            ImportCurrentOrderState(**kwargs),
+            ImportCurrentOrderLineState(**kwargs),
+            ImportCurrentOrderLineAttributeState(**kwargs),
+            ImportCurrentOrderLinePriceState(**kwargs),
+
+            # Ecommerce Payment Tables
+            ImportOrderPaymentEvent(**kwargs),
+            ImportPaymentSource(**kwargs),
+            ImportPaymentTransactions(**kwargs),
+            ImportPaymentProcessorResponse(**kwargs),
         )
 
     def output(self):
